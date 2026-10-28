@@ -2,6 +2,7 @@ use super::*;
 use crate::controls::platform_default as default;
 use herdr_client::protocol::ClientShellCommand;
 
+mod agent_pane_keys;
 mod custom_defaults;
 mod custom_reference;
 mod literal_plus;
@@ -453,7 +454,7 @@ fn every_prefix_arms_and_the_first_labels_chords() {
 fn pane_keys(entries: &[(&str, &str)]) -> PaneKeys {
     entries
         .iter()
-        .map(|(typed, sent)| ((*typed).to_owned(), (*sent).to_owned()))
+        .map(|(typed, sent)| ((*typed).to_owned(), (*sent).into()))
         .collect()
 }
 
@@ -482,15 +483,14 @@ fn default_pane_keys_follow_ghostty_on_macos() {
         if cfg!(target_os = "macos") { 6 } else { 1 }
     );
     // Defaults are replaced by keystroke, not spelling, or removed.
-    let resolved = resolve_pane_keys(
-        &pane_keys(&[
-            ("cmd-backspace", ""),
-            ("cmd-left", "home"),
-            ("ctrl-shift-enter", "alt-enter"),
-        ]),
-        defaults,
-    )
-    .unwrap();
+    let table: BTreeMap<String, String> = [
+        ("cmd-backspace", ""),
+        ("cmd-left", "home"),
+        ("ctrl-shift-enter", "alt-enter"),
+    ]
+    .map(|(typed, sent)| (typed.to_owned(), sent.to_owned()))
+    .into();
+    let resolved = resolve_pane_keys(None, &table, defaults).unwrap();
     assert_eq!(
         resolved,
         [
@@ -565,7 +565,7 @@ fn pane_keys_reject_typing_unsendable_targets_and_configured_commands() {
     assert!(resolve(&[("shift-enter", "alt-enter"), ("f13", "ctrl-u")], &[]).is_ok());
     // Counted before parsing, so a huge table is refused cheaply.
     let many: PaneKeys = (0..=MAX_PANE_KEYS)
-        .map(|n| (format!("{}cmd-k", " ".repeat(n)), "ctrl-a".to_owned()))
+        .map(|n| (format!("{}cmd-k", " ".repeat(n)), "ctrl-a".into()))
         .collect();
     assert!(matches!(
         Keymap::with_overrides(&BTreeMap::new(), &many, &no_keys()),

@@ -412,7 +412,10 @@ impl HerdrWindow {
             cx.stop_propagation();
             window.prevent_default();
         } else if self.marked.is_empty()
-            && let Some(input) = match self.keymap().pane_key(&event.keystroke) {
+            && let Some(input) = match self
+                .keymap()
+                .agent_pane_key(self.focused_pane_agent(), &event.keystroke)
+            {
                 Some(sent) => pane_key_input(event, sent),
                 None => key_input(event, alt_keys),
             }
@@ -424,6 +427,19 @@ impl HerdrWindow {
             cx.stop_propagation();
             window.prevent_default();
         }
+    }
+
+    /// The agent Herdr reports running in the focused pane, which picks its
+    /// `[pane_keys]` table. `None` once the pane is back to a shell.
+    pub(crate) fn focused_pane_agent(&self) -> Option<&str> {
+        let snapshot = self.live.snapshot.as_ref()?;
+        let pane = snapshot.focused_pane_id.as_deref()?;
+        snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == pane)?
+            .agent
+            .as_deref()
     }
 
     /// Releases a key the pane received while Herdr reported that its focused

@@ -37,9 +37,33 @@ const MAX_PANE_TEXT: usize = 1024;
 const TEXT_PREFIX: &str = "text:";
 
 /// The config's `[pane_keys]` table: a keystroke, and the keystroke or
-/// `text:` the focused pane receives for it instead. An empty value removes
-/// a default.
-pub(crate) type PaneKeys = BTreeMap<String, String>;
+/// `text:` the focused pane receives for it instead, or an agent's own table
+/// of them. An empty value removes a default.
+pub(crate) type PaneKeys = BTreeMap<String, PaneKeyEntry>;
+
+/// One `[pane_keys]` entry.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub(crate) enum PaneKeyEntry {
+    /// What the focused pane receives for this keystroke.
+    Key(String),
+    /// Keystrokes that apply only while the focused pane runs the agent this
+    /// entry is named after, as Herdr reports it (`claude`). A name no agent
+    /// reports never matches, so a new agent's table can be written early.
+    Agent(BTreeMap<String, String>),
+}
+
+impl From<String> for PaneKeyEntry {
+    fn from(sent: String) -> Self {
+        Self::Key(sent)
+    }
+}
+
+impl From<&str> for PaneKeyEntry {
+    fn from(sent: &str) -> Self {
+        Self::Key(sent.to_owned())
+    }
+}
 
 /// What the focused pane receives for a `[pane_keys]` keystroke.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,6 +161,9 @@ pub struct Keymap {
     /// Keystrokes the focused pane receives as another keystroke or as text.
     /// No command is bound to them, so GPUI's keymap never claims them first.
     pane_keys: Vec<(Keystroke, PaneKey)>,
+    /// Each agent's own pane keys, checked before `pane_keys` while the
+    /// focused pane runs that agent.
+    agent_pane_keys: Vec<(String, Vec<(Keystroke, PaneKey)>)>,
 }
 
 impl Default for Keymap {
@@ -199,9 +226,29 @@ impl Keymap {
                 }
             }
         }
-        let pane_keys = resolve_pane_keys(pane_keys, default_pane_keys())?;
-        for (typed, _) in &pane_keys {
-            if let Some(command) = claimed.insert(identity(typed), "pane_keys") {
+        if pane_keys.len() > MAX_PANE_KEYS {
+            return Err(Error::TooManyPaneKeys(MAX_PANE_KEYS).into());
+        }
+        let global = pane_keys.iter().filter_map(|(typed, entry)| match entry {
+            PaneKeyEntry::Key(sent) => Some((typed, sent)),
+            PaneKeyEntry::Agent(_) => None,
+        });
+        let global = resolve_pane_keys(None, global, default_pane_keys())?;
+        let mut agents = Vec::new();
+        for (agent, entry) in pane_keys {
+            if let PaneKeyEntry::Agent(table) = entry {
+                agents.push((agent.clone(), resolve_pane_keys(Some(agent), table, [])?));
+            }
+        }
+        // Global and agent tables may name the same keystroke, but none may
+        // name one a configured command holds.
+        let all = global
+            .iter()
+            .chain(agents.iter().flat_map(|(_, keys)| keys));
+        for (typed, _) in all {
+            if let Some(command) = claimed.insert(identity(typed), "pane_keys")
+                && command != "pane_keys"
+            {
                 return Err(Error::PaneKeyBound {
                     keystroke: typed.unparse(),
                     command,
@@ -209,7 +256,9 @@ impl Keymap {
                 .into());
             }
         }
-        Ok(Self::layer(configured, &claimed, keys, pane_keys))
+        let mut keymap = Self::layer(configured, &claimed, keys, global);
+        keymap.agent_pane_keys = agents;
+        Ok(keymap)
     }
 
     /// Herdr owns and validates its own file, so a daemon binding this client
@@ -295,15 +344,26 @@ impl Keymap {
             navigate_up: keys.navigate_up.clone(),
             navigate_down: keys.navigate_down.clone(),
             pane_keys,
+            agent_pane_keys: Vec::new(),
         }
     }
 
     /// What the focused pane receives when `typed` is pressed.
     pub(crate) fn pane_key(&self, typed: &Keystroke) -> Option<&PaneKey> {
-        self.pane_keys
-            .iter()
-            .find(|(bound, _)| typed_matches(typed, bound))
-            .map(|(_, sent)| sent)
+        find_pane_key(&self.pane_keys, typed)
+    }
+
+    /// What the focused pane receives when `typed` is pressed while it runs
+    /// `agent`: that agent's own entry, else the global one.
+    pub(crate) fn agent_pane_key(
+        &self,
+        agent: Option<&str>,
+        typed: &Keystroke,
+    ) -> Option<&PaneKey> {
+        agent
+            .and_then(|agent| self.agent_pane_keys.iter().find(|(name, _)| name == agent))
+            .and_then(|(_, keys)| find_pane_key(keys, typed))
+            .or_else(|| self.pane_key(typed))
     }
 
     /// Every shortcut bound to `command`, primary first. A prefix chord reads
@@ -406,6 +466,12 @@ impl Keymap {
     }
 }
 
+fn find_pane_key<'a>(keys: &'a [(Keystroke, PaneKey)], typed: &Keystroke) -> Option<&'a PaneKey> {
+    keys.iter()
+        .find(|(bound, _)| typed_matches(typed, bound))
+        .map(|(_, sent)| sent)
+}
+
 /// GPUI's own matching, so a shifted symbol such as `?` matches however the
 /// keyboard reports it.
 fn typed_matches(typed: &Keystroke, bound: &Keystroke) -> bool {
@@ -435,12 +501,16 @@ fn default_pane_keys() -> impl Iterator<Item = (Keystroke, PaneKey)> {
         })
 }
 
-/// Layers the config's `[pane_keys]` over `defaults`. A keystroke spelled
-/// differently still replaces its default, and an empty value removes it.
-fn resolve_pane_keys(
-    table: &PaneKeys,
+/// Layers `table`, the global `[pane_keys]` or `agent`'s table, over
+/// `defaults`. A keystroke spelled differently still replaces its default,
+/// and an empty value removes it. Errors name an agent's keystroke as
+/// `agent.keystroke`.
+fn resolve_pane_keys<'a>(
+    agent: Option<&str>,
+    table: impl IntoIterator<Item = (&'a String, &'a String)>,
     defaults: impl IntoIterator<Item = (Keystroke, PaneKey)>,
 ) -> Result<Vec<(Keystroke, PaneKey)>> {
+    let table: Vec<_> = table.into_iter().collect();
     if table.len() > MAX_PANE_KEYS {
         return Err(Error::TooManyPaneKeys(MAX_PANE_KEYS).into());
     }
@@ -454,6 +524,10 @@ fn resolve_pane_keys(
     let mut seen = HashSet::new();
     for (typed, sent) in table {
         let parsed = parse(typed.trim())?;
+        let typed = &match agent {
+            Some(agent) => format!("{agent}.{typed}"),
+            None => typed.clone(),
+        };
         // A bare character or space is typing, which must reach the pane as text.
         if !has_modifier(&parsed) && (parsed.key.chars().nth(1).is_none() || parsed.key == "space")
         {

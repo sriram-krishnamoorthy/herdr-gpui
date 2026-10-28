@@ -16,6 +16,7 @@ use std::{
     sync::atomic::AtomicU64,
 };
 
+mod agent_pane_keys;
 mod atomic_projection;
 mod background_commands;
 mod close_pane;

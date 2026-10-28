@@ -4225,7 +4225,19 @@ Ctrl+Shift+U is left unbound for
   it under `[keybindings]` as well rejects the config, as do a bare character,
   an unknown key, a target with cmd, or an empty `text:`. The find field and
   dialogs answer Cmd-Left, Cmd-Right, Cmd-Backspace, and Cmd-Delete
-  themselves.
+  themselves. A sub-table named after an agent, as Herdr reports it
+  (`[pane_keys.claude]`), applies only while the focused pane runs that agent,
+  ahead of the global entries. Keystrokes it does not list fall through to
+  them and then to normal input, and when the agent exits, the pane gets the
+  global keys again.
+  Its entries follow the same rules and may name a keystroke the global table
+  or another agent also names, so Enter can change for one agent alone. An
+  empty value there removes nothing, so the global entry still applies. A
+  name no agent reports never matches.
+  With Claude Code's `"autoScrollEnabled": false`,
+  `enter = "text:\u001b[1;5F\r"` sends Ctrl-End before submitting, so Enter
+  jumps to the end of the conversation, and `"cmd-enter" = "text:\r"` submits
+  and keeps the scroll position.
 - The daemon's own `[keys]` table in `config.toml` (resolved like
   `[ui.toast.clipboard]` above) applies in the GUI too, Herdr's defaults
   included, so a TUI habit such as `prefix+v` or `alt+1..9` works in both

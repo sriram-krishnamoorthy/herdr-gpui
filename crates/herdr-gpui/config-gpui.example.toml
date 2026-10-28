@@ -321,6 +321,15 @@ project_roots = []
 # Norwegian keyboard Option-7 is "alt-7" and Option-Shift-7 is "alt-/".
 # "alt-7" = "text:|"
 # "alt-/" = "text:\\"
+# A sub-table named after an agent, as Herdr reports it (claude, codex, ...),
+# applies only while the focused pane runs that agent, ahead of the keys
+# above; keystrokes it does not list fall through to them. A name no agent
+# reports never matches. With Claude Code's "autoScrollEnabled": false, Enter
+# jumps to the end of the conversation (Ctrl-End) and submits, while Cmd-Enter
+# submits and keeps the scroll position:
+# [pane_keys.claude]
+# enter = "text:\u001b[1;5F\r"
+# "cmd-enter" = "text:\r"
 
 # Saved SSH devices use the local keybindings above, as `herdr --remote` does.
 # "server" uses the [keys] profile that device's Herdr publishes instead, like

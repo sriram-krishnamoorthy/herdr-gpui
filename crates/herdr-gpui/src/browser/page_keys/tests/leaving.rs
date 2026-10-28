@@ -60,8 +60,8 @@ fn rebound_keys_leave_a_page_in_place_of_the_defaults() {
         ("previous_agent".to_owned(), one("cmd-}")),
     ]);
     let pane_keys = PaneKeys::from([
-        ("cmd-left".to_owned(), String::new()),
-        ("cmd-right".to_owned(), String::new()),
+        ("cmd-left".to_owned(), "".into()),
+        ("cmd-right".to_owned(), "".into()),
     ]);
     bind(&Keymap::with_overrides(&overrides, &pane_keys, &DaemonKeys::default()).unwrap());
     for arrow in ["\u{f700}", "\u{f701}", "\u{f702}", RIGHT] {

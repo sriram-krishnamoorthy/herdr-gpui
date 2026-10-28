@@ -32,7 +32,7 @@ fn connect(
             assert!(view.input_ready());
             let pane_keys = pane_keys
                 .iter()
-                .map(|(typed, sent)| ((*typed).to_owned(), (*sent).to_owned()))
+                .map(|(typed, sent)| ((*typed).to_owned(), (*sent).into()))
                 .collect();
             view.config.keybindings = crate::keymap::Keymap::with_overrides(
                 &Default::default(),
